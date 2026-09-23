@@ -47,7 +47,7 @@ from fastapi.staticfiles import StaticFiles
 
 RESOURCE = os.environ.get(
     "AGENT_ENGINE_RESOURCE_NAME",
-    "projects/641471327587/locations/us-east1/reasoningEngines/5340611650107998208",
+    "projects/538926441420/locations/us-east1/reasoningEngines/3569782202877083648",
 )
 # The agent's app directory (matches agent_directory in agents-cli-manifest.yaml).
 AGENT_DIRECTORY = os.environ.get("AGENT_DIRECTORY", "app")

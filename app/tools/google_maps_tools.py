@@ -46,13 +46,50 @@ def geocode_address(address: str) -> dict[str, Any]:
         return {"error": f"Geocoding API request failed: {str(e)}"}
 
 
+def _fallback_nearby_search(
+    latitude: float,
+    longitude: float,
+    place_type: str,
+    radius_meters: int,
+    api_key: str,
+) -> list[dict[str, Any]]:
+    """Fallback using Google Places Nearby Search (Legacy API)."""
+    type_map = {
+        "coffee_shop": "cafe",
+        "coffee": "cafe",
+        "grocery": "supermarket",
+    }
+    legacy_type = type_map.get(place_type.lower().strip(), place_type.lower().strip())
+    url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={latitude},{longitude}&radius={radius_meters}&type={legacy_type}&key={api_key}"
+    req = urllib.request.Request(url, headers={"User-Agent": "HavenScout/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            results = []
+            for item in data.get("results", [])[:5]:
+                loc = item.get("geometry", {}).get("location", {})
+                results.append({
+                    "name": item.get("name", "Unknown Place"),
+                    "address": item.get("vicinity", ""),
+                    "location": {
+                        "latitude": loc.get("lat"),
+                        "longitude": loc.get("lng"),
+                    },
+                })
+            if results:
+                return results
+            return [{"error": f"No nearby {place_type} found within {radius_meters}m"}]
+    except Exception as e:
+        return [{"error": f"Places API fallback request failed: {str(e)}"}]
+
+
 def find_nearby_places(
     latitude: float,
     longitude: float,
     place_type: str = "restaurant",
     radius_meters: int = 1500,
 ) -> list[dict[str, Any]]:
-    """Find nearby points of interest (restaurants, supermarkets, parks, schools, etc.) using Google Places API (New).
+    """Find nearby points of interest (restaurants, supermarkets, parks, schools, etc.) using Google Places API.
 
     Args:
         latitude: Center latitude coordinate (e.g. 30.26397).
@@ -67,6 +104,13 @@ def find_nearby_places(
     if not api_key:
         return [{"error": "GOOGLE_MAPS_API_KEY environment variable is not configured."}]
 
+    # Type mapping for Places API (New)
+    new_type_map = {
+        "coffee_shop": "cafe",
+        "coffee": "cafe",
+    }
+    target_type = new_type_map.get(place_type.lower().strip(), place_type.lower().strip())
+
     url = "https://places.googleapis.com/v1/places:searchNearby"
     headers = {
         "Content-Type": "application/json",
@@ -75,7 +119,7 @@ def find_nearby_places(
     }
 
     body = {
-        "includedTypes": [place_type.lower().strip()],
+        "includedTypes": [target_type],
         "maxResultCount": 5,
         "locationRestriction": {
             "circle": {
@@ -112,6 +156,10 @@ def find_nearby_places(
                         "longitude": loc.get("longitude"),
                     },
                 })
-            return results
-    except Exception as e:
-        return [{"error": f"Places API (New) request failed: {str(e)}"}]
+            if results:
+                return results
+    except Exception:
+        pass
+
+    # Fallback to Places Nearby Search API
+    return _fallback_nearby_search(latitude, longitude, place_type, radius_meters, api_key)

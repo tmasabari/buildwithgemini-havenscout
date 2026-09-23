@@ -12,12 +12,15 @@ from google.cloud import firestore, storage
 from PIL import Image, ImageDraw
 
 # Hardcoded project ID as string to satisfy Agent Platform requirements
-PROJECT_ID = "qwiklabs-gcp-01-bd458d080332"
-BUCKET_NAME = "havenscout-media-qwiklabs-gcp-01-bd458d080332"
+PROJECT_ID = "qwiklabs-gcp-03-33f9e74cd81f"
+BUCKET_NAME = "havenscout-media-qwiklabs-gcp-03-33f9e74cd81f"
 
+
+import google.auth
 
 def _get_firestore_client() -> firestore.Client:
-    return firestore.Client(project=PROJECT_ID)
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return firestore.Client(project=PROJECT_ID, credentials=creds)
 
 
 def search_listings(
@@ -244,3 +247,79 @@ def get_zipcode_neighborhood_info(zipcode: str) -> dict[str, Any]:
             }
     except Exception as e:
         return {"error": f"Failed to fetch neighborhood data for ZIP {zipcode}: {str(e)}"}
+
+
+def execute_python_code(code: str) -> dict[str, Any]:
+    """Execute Python code for mathematical calculations, financial modeling, compound interest, or custom logic.
+
+    Args:
+        code: Python code string to execute. The output or result variable will be returned.
+
+    Returns:
+        Dictionary containing stdout output, evaluation result, or execution error.
+    """
+    import sys
+    from io import StringIO
+
+    buffer = StringIO()
+    local_scope = {}
+    sys_stdout = sys.stdout
+    try:
+        sys.stdout = buffer
+        exec(code, {"__builtins__": __builtins__}, local_scope)
+        sys.stdout = sys_stdout
+        captured_output = buffer.getvalue().strip()
+        result = local_scope.get("result") or local_scope.get("ans") or captured_output
+        return {
+            "status": "success",
+            "output": captured_output,
+            "result": str(result) if result is not None else captured_output,
+            "variables": {k: str(v) for k, v in local_scope.items() if not k.startswith("_")},
+        }
+    except Exception as e:
+        sys.stdout = sys_stdout
+        return {"status": "error", "error": str(e)}
+
+
+def calculate_compound_interest(
+    principal: float,
+    annual_rate_percent: float,
+    years: float,
+    compounding_frequency_per_year: int = 1,
+) -> dict[str, Any]:
+    """Calculate compound interest on security deposits, savings, or investments over time.
+
+    Args:
+        principal: Initial deposit or investment amount in USD (e.g. 3000.0).
+        annual_rate_percent: Annual interest rate in percent (e.g. 4.5 for 4.5%).
+        years: Time period in years (e.g. 3.0).
+        compounding_frequency_per_year: Number of times interest is compounded per year (default 1 for annually, 12 for monthly, 365 for daily).
+
+    Returns:
+        Dictionary breakdown containing initial principal, interest earned, total future value, and annual progression.
+    """
+    r = annual_rate_percent / 100.0
+    n = max(1, compounding_frequency_per_year)
+    t = years
+
+    future_value = principal * ((1 + r / n) ** (n * t))
+    interest_earned = future_value - principal
+
+    yearly_breakdown = []
+    for y in range(1, int(years) + 1):
+        fv_y = principal * ((1 + r / n) ** (n * y))
+        yearly_breakdown.append({
+            "year": y,
+            "balance": round(fv_y, 2),
+            "interest_earned_cumulative": round(fv_y - principal, 2),
+        })
+
+    return {
+        "principal": round(principal, 2),
+        "annual_rate_percent": annual_rate_percent,
+        "years": years,
+        "compounding_frequency": compounding_frequency_per_year,
+        "interest_earned": round(interest_earned, 2),
+        "future_value": round(future_value, 2),
+        "yearly_breakdown": yearly_breakdown,
+    }

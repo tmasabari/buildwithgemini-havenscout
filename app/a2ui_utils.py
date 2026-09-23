@@ -217,6 +217,55 @@ def _surface_is_renderable(messages: list[dict]) -> bool:
     return True
 
 
+def _ensure_begin_rendering(messages: list[dict]) -> list[dict]:
+    """Ensure beginRendering message exists if surfaceUpdate is present."""
+    existing_br_surfaces = {
+        m["beginRendering"]["surfaceId"]
+        for m in messages
+        if "beginRendering" in m and isinstance(m.get("beginRendering"), dict) and "surfaceId" in m["beginRendering"]
+    }
+
+    injected_br = []
+    for m in messages:
+        if "surfaceUpdate" in m and isinstance(m["surfaceUpdate"], dict):
+            sid = m["surfaceUpdate"].get("surfaceId", "defaultSurface")
+            if sid not in existing_br_surfaces:
+                injected_br.append({
+                    "beginRendering": {
+                        "surfaceId": sid,
+                        "root": "root"
+                    }
+                })
+                existing_br_surfaces.add(sid)
+
+    if injected_br:
+        return injected_br + messages
+    return messages
+
+
+def _extract_text_summary(messages: list[dict]) -> str:
+    """Extract a human-readable Markdown summary from A2UI Text components."""
+    lines = []
+    for m in messages:
+        su = m.get("surfaceUpdate")
+        if not isinstance(su, dict):
+            continue
+        for c in su.get("components") or []:
+            if not isinstance(c, dict):
+                continue
+            comp = c.get("component", {})
+            if "Text" in comp:
+                t = comp["Text"].get("text", {}).get("literalString", "")
+                hint = comp["Text"].get("usageHint", "")
+                if not t:
+                    continue
+                if hint in ("h1", "h2", "h3"):
+                    lines.append(f"\n### {t}")
+                else:
+                    lines.append(f"- {t}")
+    return "\n".join(lines).strip()
+
+
 def a2ui_callback(
     callback_context: CallbackContext,
     llm_response: LlmResponse,
@@ -237,20 +286,29 @@ def a2ui_callback(
         if not messages:
             continue
 
+        messages = _ensure_begin_rendering(messages)
+
         # Turn un-fetchable <Image> URLs into a text note (no broken-image icons).
         _sanitize_image_components(messages)
+
+        text_summary = _extract_text_summary(messages)
 
         if not _surface_is_renderable(messages):
             # We recognized A2UI but couldn't recover a renderable surface — the
             # model emitted invalid JSON, a missing surface body, or an undefined
             # root/child reference. Return clean text instead of a blank card.
+            fallback = text_summary or _FALLBACK_TEXT
             return LlmResponse(
                 content=types.Content(
-                    role="model", parts=[types.Part(text=_FALLBACK_TEXT)]
+                    role="model", parts=[types.Part(text=fallback)]
                 )
             )
 
-        new_parts = [_wrap_a2ui_part(m) for m in messages]
+        new_parts = []
+        if text_summary:
+            new_parts.append(types.Part(text=text_summary))
+        new_parts.extend([_wrap_a2ui_part(m) for m in messages])
+
         return LlmResponse(
             content=types.Content(role="model", parts=new_parts),
             custom_metadata={"a2a:response": "true"},

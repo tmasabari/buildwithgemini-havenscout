@@ -73,7 +73,7 @@ def get_memory_service():
             mb_id = uri.replace("agentengine://", "")
 
     return VertexAiMemoryBankService(
-        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-01-bd458d080332"),
+        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-03-33f9e74cd81f"),
         location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-east1"),
         agent_engine_id=mb_id,
     )

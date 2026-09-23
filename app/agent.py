@@ -23,7 +23,7 @@ load_dotenv()
 
 # Ensure Vertex AI mode is explicitly enabled for Gemini LLM calls
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
-os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-01-bd458d080332")
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "qwiklabs-gcp-03-33f9e74cd81f")
 os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "us-east1")
 
 from a2ui.basic_catalog.provider import BasicCatalog
@@ -40,14 +40,16 @@ from google.genai import types
 from app.a2ui_utils import a2ui_callback
 from app.tools.firestore_tools import (
     add_listing,
+    calculate_compound_interest,
     calculate_move_in_costs,
+    execute_python_code,
     generate_interior_decor_image,
     get_zipcode_neighborhood_info,
     schedule_tour,
     search_listings,
 )
 from app.tools.google_maps_tools import find_nearby_places, geocode_address
-from app.tools.image_tools import generate_property_image
+from app.tools.image_tools import generate_property_image, generate_property_video
 
 # 1. Build A2UI System Prompt (v0.8 with Basic Catalog)
 schema_manager = A2uiSchemaManager(
@@ -62,11 +64,14 @@ instruction = schema_manager.generate_system_prompt(
         "and facts from previous conversations to personalize your apartment search and recommendations. "
         "Use search_listings to find apartments, add_listing to add new listings, schedule_tour to book property viewings, "
         "calculate_move_in_costs to compute total upfront move-in expenses and rent-to-income affordability, "
+        "calculate_compound_interest to calculate compound interest on security deposits or investments over time, "
+        "execute_python_code to execute custom Python code for mathematical formulas and financial modeling, "
         "generate_interior_decor_image or generate_property_image to create realistic property and decor images using gemini-3.1-flash-lite-image, "
+        "generate_property_video to create short property tour videos using Google's Omni model (gemini-omni-flash-preview) in global region, "
         "get_zipcode_neighborhood_info to fetch ZIP code info, geocode_address to convert addresses to coordinates, "
         "and find_nearby_places to search points of interest."
     ),
-    workflow_description="Analyze the request, search listings, calculate costs, generate images, or fetch location details, and return structured UI when appropriate.",
+    workflow_description="Analyze the request, search listings, calculate costs or compound interest, generate images or property tour videos, or fetch location details, and return structured UI when appropriate.",
     ui_description=(
         "Keep every surface tiny and flat: ONE Card > ONE Column > a few Text rows. "
         "Never nest a Card inside a Card. "
@@ -146,7 +151,7 @@ class CustomCodeExecutor(AgentEngineSandboxCodeExecutor):
 
 
 code_executor = CustomCodeExecutor(
-    agent_engine_resource_name="projects/641471327587/locations/us-east1/reasoningEngines/5340611650107998208"
+    agent_engine_resource_name="projects/538926441420/locations/us-east1/reasoningEngines/3569782202877083648"
 )
 
 root_agent = Agent(
@@ -162,8 +167,11 @@ root_agent = Agent(
         add_listing,
         schedule_tour,
         calculate_move_in_costs,
+        calculate_compound_interest,
+        execute_python_code,
         generate_interior_decor_image,
         generate_property_image,
+        generate_property_video,
         get_zipcode_neighborhood_info,
         geocode_address,
         find_nearby_places,

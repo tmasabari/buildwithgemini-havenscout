@@ -1,9 +1,10 @@
 # Copyright 2026 Google LLC
 import logging
+import google.auth
 from google.cloud import firestore
 
 # Hardcoded project ID as required for Agent Platform compatibility
-PROJECT_ID = "qwiklabs-gcp-01-bd458d080332"
+PROJECT_ID = "qwiklabs-gcp-03-33f9e74cd81f"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 def seed_firestore_database():
     """Seed the Firestore database with sample HavenScout apartment listings."""
-    db = firestore.Client(project=PROJECT_ID)
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    db = firestore.Client(project=PROJECT_ID, credentials=creds)
     collection_ref = db.collection("listings")
 
     sample_listings = [

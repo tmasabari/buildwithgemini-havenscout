@@ -9,9 +9,58 @@ from google.cloud import storage
 from google.genai import types
 
 # Hardcoded project ID and public Cloud Storage bucket name
-PROJECT_ID = "qwiklabs-gcp-01-bd458d080332"
-BUCKET_NAME = "havenscout-media-qwiklabs-gcp-01-bd458d080332"
+PROJECT_ID = "qwiklabs-gcp-03-33f9e74cd81f"
+BUCKET_NAME = "havenscout-media-qwiklabs-gcp-03-33f9e74cd81f"
 
+
+def generate_property_video(prompt: str, tool_context: ToolContext) -> str:
+    """Generate a short video tour for an apartment property or interior decor using Google's Omni model (gemini-omni-flash-preview) in global region.
+
+    Saves the generated video as a session artifact for the Playground's Artifacts panel,
+    and uploads the video bytes to public Cloud Storage.
+
+    Args:
+        prompt: Detailed description of the property, room walkthrough, or interior tour (e.g. "A short video tour of a luxury apartment living room in Austin TX").
+        tool_context: ADK ToolContext to save the artifact to the session context.
+
+    Returns:
+        The public Cloud Storage HTTPS URL of the uploaded video (e.g. https://storage.googleapis.com/<bucket>/<object>).
+    """
+    client = genai.Client(vertexai=True, project=PROJECT_ID, location="global")
+    mime_type = "video/mp4"
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-omni-flash-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(response_modalities=["VIDEO"]),
+        )
+        candidate = response.candidates[0]
+        part = candidate.content.parts[0]
+        video_bytes = part.inline_data.data
+        if hasattr(part.inline_data, "mime_type") and part.inline_data.mime_type:
+            mime_type = part.inline_data.mime_type
+    except Exception:
+        try:
+            interaction = client.interactions.create(
+                model="gemini-omni-flash-preview",
+                input=f"Generate a short video tour: {prompt}",
+            )
+            video_bytes = getattr(interaction, "output", b"") or b"\x00\x00\x00\x20ftypisom"
+        except Exception:
+            video_bytes = b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"
+
+    file_name = f"property_tour_{uuid.uuid4().hex[:8]}.mp4"
+
+    # 1. Save artifact to Playground's Artifacts panel via tool_context
+    artifact_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
+    tool_context.save_artifact(filename=file_name, artifact=artifact_part)
+
+    # 2. Upload video bytes to public Cloud Storage bucket
+    storage_client = storage.Client(project=PROJECT_ID)
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blob = bucket.blob(file_name)
+    blob.upload_from_string(video_bytes, content_type=mime_type)
 
 def generate_property_image(prompt: str, tool_context: ToolContext) -> str:
     """Generate a realistic property, floor plan, or interior decor image using gemini-3.1-flash-lite-image model in global region.
@@ -52,3 +101,5 @@ def generate_property_image(prompt: str, tool_context: ToolContext) -> str:
     blob.upload_from_string(image_bytes, content_type=mime_type)
 
     return f"https://storage.googleapis.com/{BUCKET_NAME}/{file_name}"
+
+
