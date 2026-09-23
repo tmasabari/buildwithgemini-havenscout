@@ -1,156 +1,205 @@
-# HavenScout - Comprehensive Project Context & Resumption Guide
+# HavenScout - Complete Re-Creation & Resumption Guide (From Scratch)
 
-This document contains full technical details, credentials configuration, architectural breakdown, and step-by-step instructions to resume development and deployment of **HavenScout** in a fresh VM environment.
-
----
-
-## 📌 Project Overview
-
-- **Project Name**: HavenScout
-- **Description**: An AI Real Estate & Apartment Finder agent built using the **Google Agent Development Kit (ADK)** and deployed to **Agent Runtime on Vertex AI**.
-- **Key Capabilities**:
-  - **Firestore Database Integration**: Search property listings, schedule property viewing tours, record listings, and compute move-in costs & affordability ratios.
-  - **Google Maps REST APIs**: Convert street addresses to geographical coordinates (Geocoding API) and search nearby points of interest (Places API New).
-  - **Gemini Image Generation**: Generates property interior decor previews using `gemini-3.1-flash-lite-image`, automatically saving them as ADK session artifacts and uploading to a public Google Cloud Storage bucket.
-  - **A2UI v0.8 Rich Card Formatting**: Generates native A2UI JSON components (`Card`, `Column`, `Row`, `Text`, `Image`) rendered directly in the custom web chat UI.
-  - **Sandbox Code Execution**: Runs Python code snippets safely in a managed Agent Engine sandbox using `AgentEngineSandboxCodeExecutor`.
-  - **FastAPI Web Proxy & UI**: Includes a lightweight FastAPI frontend proxy in `./frontend` communicating over the **A2A protocol**.
+This document provides a complete, step-by-step guide to rebuild, reconfigure, deploy, and run **HavenScout** from total zero in a brand-new Google Cloud Platform (GCP) project, clean Virtual Machine (VM), or fresh developer workspace.
 
 ---
 
-## ⚙️ GCP Infrastructure & Credentials Metadata
-
-| Resource | Value / Name | Notes |
-| :--- | :--- | :--- |
-| **GCP Project ID** | `qwiklabs-gcp-01-bd458d080332` | Hardcoded as string in Firestore/GCS tools |
-| **GCP Region** | `us-east1` | Agent Runtime location |
-| **Reasoning Engine Resource ID** | `projects/641471327587/locations/us-east1/reasoningEngines/5340611650107998208` | Agent Engine sandbox resource |
-| **Public GCS Bucket** | `havenscout-media-qwiklabs-gcp-01-bd458d080332` | Public bucket for generated images |
-| **Agent Service Account** | `service-641471327587@gcp-sa-aiplatform-re.iam.gserviceaccount.com` | Granted `roles/datastore.user` & `roles/storage.objectAdmin` |
-| **Primary LLM Model** | `gemini-2.5-flash` | Used for tool calling and reasoning |
-| **Image Model** | `gemini-3.1-flash-lite-image` | Executed in `global` region |
+## 📋 Table of Contents
+1. [Overview & Capabilities](#-overview--capabilities)
+2. [Phase 1: Environment & New GCP Project Setup](#phase-1-environment--new-gcp-project-setup)
+3. [Phase 2: Codebase Configuration](#phase-2-codebase-configuration)
+4. [Phase 3: Deploying Agent to Agent Platform](#phase-3-deploying-agent-to-agent-platform)
+5. [Phase 4: Setting Service Account IAM Permissions](#phase-4-setting-service-account-iam-permissions)
+6. [Phase 5: Running Local Web UI & Testing](#phase-5-running-local-web-ui--testing)
+7. [Architecture Reference & Code Quirks](#architecture-reference--code-quirks)
 
 ---
 
-## 🔑 Environment Variables (`.env`)
+## 📌 Overview & Capabilities
 
-Create a `.env` file in the project root (`./.env`) with the following settings:
-
-```bash
-GOOGLE_GENAI_USE_VERTEXAI=true
-GOOGLE_CLOUD_PROJECT=qwiklabs-gcp-01-bd458d080332
-GOOGLE_CLOUD_LOCATION=us-east1
-GOOGLE_MAPS_API_KEY=AIzaSyChOXruBh6Fbads6EkpFydxVkhL_Pidghk
-```
-
----
-
-## 📁 Repository Structure
-
-```
-havenscout/
-├── app/
-│   ├── __init__.py
-│   ├── agent.py                 # Core agent definition, prompt, model & CustomCodeExecutor
-│   ├── a2ui_utils.py            # A2UI v0.8 schema callback & image sanitization
-│   └── tools/
-│       ├── __init__.py
-│       ├── firestore_tools.py   # Firestore CRUD, move-in calculator & GCS image uploads
-│       ├── google_maps_tools.py # Google Maps Geocoding & Places (New) REST tools
-│       └── image_generation_tool.py # Gemini 3.1 Flash Lite Image generation tool
-├── frontend/
-│   ├── main.py                  # FastAPI proxy talking A2A protocol to Agent Runtime
-│   ├── requirements.txt         # Frontend dependencies (fastapi, uvicorn, a2a-sdk)
-│   └── static/
-│       └── index.html           # Plain chat web UI with native A2UI card renderer
-├── agents-cli-manifest.yaml     # Agent deployment manifest
-├── deployment_metadata.json     # Active Reasoning Engine deployment metadata
-├── pyproject.toml               # Python dependencies managed via uv
-└── PROJECT_CONTEXT.md           # Project context & resumption guide (this file)
-```
+- **Framework**: Built with **Google Agent Development Kit (ADK)** and deployed on **Vertex AI Agent Runtime**.
+- **Features**:
+  - **Firestore DB**: Search properties, schedule viewings, record new listings, compute move-in costs & rent affordability ratios.
+  - **Google Maps REST APIs**: Geocoding API (address -> lat/long) and Places API New (nearby venues & points of interest).
+  - **Gemini Image Generation**: Generates interior decor images using `gemini-3.1-flash-lite-image`, uploads to a public Cloud Storage bucket, and registers ADK session artifacts.
+  - **Rich A2UI Cards**: Emits native A2UI v0.8 cards (`Card`, `Column`, `Row`, `Text`, `Image`) rendered in the chat UI.
+  - **Sandbox Code Execution**: Runs Python code safely in a managed Agent Engine sandbox using `CustomCodeExecutor`.
+  - **FastAPI A2A Proxy & Web UI**: Includes a FastAPI proxy in `./frontend` talking to the deployed agent over the **A2A protocol**.
 
 ---
 
-## 🛠️ Key Implementation & Fixes Reference
+## Phase 1: Environment & New GCP Project Setup
 
-1. **Picklable Code Executor (`CustomCodeExecutor`)**:
-   - `AgentEngineSandboxCodeExecutor` in ADK contains `threading.Lock()` which fails `cloudpickle` during `agents-cli deploy`.
-   - Solved in [`app/agent.py`](file:///config/Desktop/Session1/havenscout/app/agent.py) via a custom subclass:
-     ```python
-     class CustomCodeExecutor(AgentEngineSandboxCodeExecutor):
-         def __getstate__(self):
-             state = self.__dict__.copy()
-             state["_agent_engine_creation_lock"] = None
-             return state
-
-         def __setstate__(self, state):
-             self.__dict__.update(state)
-             self._agent_engine_creation_lock = threading.Lock()
-     ```
-
-2. **Memory Callback Safeguard**:
-   - `generate_memories_callback` in [`app/agent.py`](file:///config/Desktop/Session1/havenscout/app/agent.py) wraps `add_session_to_memory()` in a `try...except` block so local testing without Vertex AI Memory Bank does not crash agent output.
-
-3. **FastAPI A2A Proxy (`frontend/main.py`)**:
-   - Connects to Agent Engine passthrough URL `https://us-east1-aiplatform.googleapis.com/reasoningEngines/v1/.../api/a2a/app`.
-   - Authenticates via ADC and parses A2UI data parts tagged `application/json+a2ui`.
-
----
-
-## 🚀 How to Resume in a New VM
-
-### Step 1: Clone Repository & Setup Environment
+### 1.1 Clone Repository & Install Dependencies
 ```bash
 git clone https://github.com/tmasabari/buildwithgemini-havenscout.git
 cd buildwithgemini-havenscout
 
-# Create .env file
-cat <<'EOF' > .env
-GOOGLE_GENAI_USE_VERTEXAI=true
-GOOGLE_CLOUD_PROJECT=qwiklabs-gcp-01-bd458d080332
-GOOGLE_CLOUD_LOCATION=us-east1
-GOOGLE_MAPS_API_KEY=AIzaSyChOXruBh6Fbads6EkpFydxVkhL_Pidghk
-EOF
-```
-
-### Step 2: Install Python Dependencies
-```bash
-# Using uv (recommended)
+# Create virtual environment and install packages using uv (recommended)
 uv sync
 
-# Or using pip
-python -m venv .venv
+# Or using standard python/pip:
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r frontend/requirements.txt
 ```
 
-### Step 3: Authenticate with GCP
+### 1.2 Authenticate & Select GCP Project
 ```bash
 gcloud auth login
 gcloud auth application-default login
-gcloud config set project qwiklabs-gcp-01-bd458d080332
+
+# Set your active GCP project ID
+export PROJECT_ID="<YOUR_NEW_PROJECT_ID>"
+gcloud config set project $PROJECT_ID
 ```
 
-### Step 4: Run Locally
+### 1.3 Enable Required Google Cloud APIs
+```bash
+gcloud services enable \
+  aiplatform.googleapis.com \
+  firestore.googleapis.com \
+  storage.googleapis.com \
+  geocoding-backend.googleapis.com \
+  places-backend.googleapis.com
+```
 
-#### Option A: Run CLI Agent Mode
+### 1.4 Provision Firestore Database & Public GCS Bucket
+```bash
+# Create Firestore Native Database in us-east1
+gcloud firestore databases create --location=us-east1 --type=firestore-native
+
+# Create Public GCS Bucket for Generated Images
+export BUCKET_NAME="havenscout-media-${PROJECT_ID}"
+gcloud storage buckets create "gs://${BUCKET_NAME}" --location=us-east1
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+  --member="allUsers" \
+  --role="roles/storage.objectViewer"
+```
+
+### 1.5 Obtain Google Maps API Key
+1. Go to **Google Cloud Console -> APIs & Services -> Credentials**.
+2. Create an API Key and ensure **Geocoding API** and **Places API (New)** are enabled for it.
+
+---
+
+## Phase 2: Codebase Configuration
+
+### 2.1 Create Local `.env` File
+Create a `.env` file in the project root (`./.env`):
+
+```bash
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=<YOUR_NEW_PROJECT_ID>
+GOOGLE_CLOUD_LOCATION=us-east1
+GOOGLE_MAPS_API_KEY=<YOUR_NEW_GOOGLE_MAPS_API_KEY>
+```
+
+### 2.2 Update Hardcoded Project & Bucket Names in Source Code
+Update lines 15-16 in [`app/tools/firestore_tools.py`](file:///config/Desktop/Session1/havenscout/app/tools/firestore_tools.py):
+
+```python
+PROJECT_ID = "<YOUR_NEW_PROJECT_ID>"
+BUCKET_NAME = "havenscout-media-<YOUR_NEW_PROJECT_ID>"
+```
+
+---
+
+## Phase 3: Deploying Agent to Agent Platform
+
+### 3.1 Initial Deployment Command
+Deploy your agent to Vertex AI Agent Runtime:
+
+```bash
+agents-cli deploy --no-confirm-project
+```
+
+Once deployment finishes, copy the generated **Reasoning Engine Resource Name**:
+`projects/<PROJECT_NUMBER>/locations/us-east1/reasoningEngines/<REASONING_ENGINE_ID>`
+
+### 3.2 Update Reasoning Engine Resource IDs in Code
+Update the `agent_engine_resource_name` string in:
+
+1. **[`app/agent.py`](file:///config/Desktop/Session1/havenscout/app/agent.py)**:
+   ```python
+   code_executor = CustomCodeExecutor(
+       agent_engine_resource_name="projects/<PROJECT_NUMBER>/locations/us-east1/reasoningEngines/<REASONING_ENGINE_ID>"
+   )
+   ```
+
+2. **[`frontend/main.py`](file:///config/Desktop/Session1/havenscout/frontend/main.py)**:
+   ```python
+   RESOURCE = os.environ.get(
+       "AGENT_ENGINE_RESOURCE_NAME",
+       "projects/<PROJECT_NUMBER>/locations/us-east1/reasoningEngines/<REASONING_ENGINE_ID>",
+   )
+   ```
+
+3. **[`deployment_metadata.json`](file:///config/Desktop/Session1/havenscout/deployment_metadata.json)**:
+   Update `"remote_agent_runtime_id"`.
+
+---
+
+## Phase 4: Setting Service Account IAM Permissions
+
+Your deployed agent runs under an Agent Runtime service account (`service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com`). Grant it the required permissions:
+
+```bash
+export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+export SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+# Grant Firestore Database User permission
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SA" \
+  --role="roles/datastore.user"
+
+# Grant Storage Object Admin permission on the media bucket
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+  --member="serviceAccount:$SA" \
+  --role="roles/storage.objectAdmin"
+```
+
+---
+
+## Phase 5: Running Local Web UI & Testing
+
+### 5.1 Run Local CLI Query Test
 ```bash
 agents-cli run "Find 2 bedroom apartments in Central Austin"
 ```
 
-#### Option B: Run ADK Web Playground
+### 5.2 Run ADK Web Playground
 ```bash
 uv run adk web --port 8080 --allow_origins "*"
-# Open http://localhost:8080
+# Access at http://localhost:8080
 ```
 
-#### Option C: Run FastAPI Web Proxy & Custom Chat UI
+### 5.3 Run FastAPI Proxy & Chat Web UI
 ```bash
 uv run python frontend/main.py
-# Open http://localhost:8080
+# Access at http://localhost:8080
 ```
 
-### Step 5: Redeploy to Agent Platform
-```bash
-agents-cli deploy --no-confirm-project
-```
+---
+
+## Architecture Reference & Code Quirks
+
+1. **Cloudpickle Serialization Fix (`CustomCodeExecutor`)**:
+   ADK's `AgentEngineSandboxCodeExecutor` contains `threading.Lock()` which breaks `cloudpickle` during `agents-cli deploy`. In [`app/agent.py`](file:///config/Desktop/Session1/havenscout/app/agent.py), `CustomCodeExecutor` handles state serialization cleanly:
+   ```python
+   class CustomCodeExecutor(AgentEngineSandboxCodeExecutor):
+       def __getstate__(self):
+           state = self.__dict__.copy()
+           state["_agent_engine_creation_lock"] = None
+           return state
+
+       def __setstate__(self, state):
+           self.__dict__.update(state)
+           self._agent_engine_creation_lock = threading.Lock()
+   ```
+
+2. **Vertex AI Model Naming**:
+   Use `gemini-2.5-flash` for agent reasoning in `us-east1` (do not use `gemini-flash-latest` which returns 404 in Vertex AI).
+
+3. **A2UI v0.8 & Image Sanitization**:
+   [`app/a2ui_utils.py`](file:///config/Desktop/Session1/havenscout/app/a2ui_utils.py) converts `<Image>` components with relative or non-HTTP URLs into text notes so cards render cleanly without broken image icons.
